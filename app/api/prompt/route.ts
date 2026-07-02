@@ -21,6 +21,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const debug = new URL(req.url).searchParams.get("debug") === "1";
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        ...(debug
+          ? {
+              detail: err instanceof Error ? err.message : String(err),
+              name: err instanceof Error ? err.name : undefined,
+            }
+          : {}),
+      },
+      { status: 500 },
+    );
   }
 }

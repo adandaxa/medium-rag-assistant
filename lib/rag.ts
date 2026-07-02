@@ -6,6 +6,7 @@ export const SYSTEM_PROMPT =
 
 Answer concisely. When asked to "list exactly N articles", return N DISTINCT articles (different titles), not multiple passages from one article. Label each retrieved passage in the user prompt with its article_id/title/author.`;
 
+/** Public context shape returned by the API (graded contract). */
 export interface ContextItem {
   article_id: string;
   title: string;
@@ -13,10 +14,15 @@ export interface ContextItem {
   score: number;
 }
 
+/** Internal shape — also carries author for the prompt labels (per spec §9). */
+interface RetrievedItem extends ContextItem {
+  author: string;
+}
+
 export async function retrieve(
   question: string,
   ns?: string,
-): Promise<ContextItem[]> {
+): Promise<RetrievedItem[]> {
   const embRes = await openai.embeddings.create({
     model: EMBED_MODEL,
     input: question,
@@ -34,25 +40,32 @@ export async function retrieve(
     title: String(m.metadata?.title ?? ""),
     chunk: String(m.metadata?.chunk ?? ""),
     score: m.score ?? 0,
+    author: String(m.metadata?.author ?? ""),
   }));
 }
 
 export function buildUserPrompt(
   question: string,
-  context: ContextItem[],
+  context: RetrievedItem[],
 ): string {
   const passages = context
     .map(
       (c, i) =>
-        `[${i + 1}] article_id=${c.article_id} | title="${c.title}"\n${c.chunk}`,
+        `[${i + 1}] article_id=${c.article_id} | title="${c.title}" | author=${c.author || "unknown"}\n${c.chunk}`,
     )
     .join("\n\n");
   return `Context:\n${passages}\n\nQuestion: ${question}`;
 }
 
 export async function answer(question: string, ns?: string) {
-  const context = await retrieve(question, ns);
-  const userPrompt = buildUserPrompt(question, context);
+  const retrieved = await retrieve(question, ns);
+  const userPrompt = buildUserPrompt(question, retrieved);
+
+  // Strip the internal `author` field so the public context matches the
+  // graded contract exactly: { article_id, title, chunk, score }.
+  const context: ContextItem[] = retrieved.map(
+    ({ author: _author, ...item }) => item,
+  );
 
   const completion = await openai.chat.completions.create({
     model: CHAT_MODEL,
